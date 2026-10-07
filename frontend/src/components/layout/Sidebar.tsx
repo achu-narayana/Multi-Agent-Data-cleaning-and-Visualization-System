@@ -13,8 +13,8 @@ import {
   X,
   Cpu,
 } from 'lucide-react'
-import { useAuth } from '@/context/AuthContext'
-import { useDataset } from '@/context/DatasetContext'
+import { useAuth } from '@/context/useAuth'
+import { useDataset } from '@/context/useDataset'
 import { cn } from '@/utils/cn'
 
 interface SidebarProps {
@@ -24,32 +24,36 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const { user, logout } = useAuth()
-  const { selectedDataset, activeJob } = useDataset()
+  const { selectedDataset } = useDataset()
+  // Dataset-scoped sections fall back to a redirect route that picks a dataset or asks for an upload.
+  const dsPath = (section: string) =>
+    selectedDataset ? `/${section}/${selectedDataset.id}` : `/${section}`
   const navigate = useNavigate()
 
-  const navItems = [
+  const navItems: Array<{
+    label: string
+    path: string
+    icon: React.ElementType
+    badge?: string
+    highlight?: boolean
+  }> = [
     { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { label: 'Datasets', path: '/datasets', icon: Database },
-    {
-      label: 'Cleaning',
-      path: `/cleaning/${activeJob?.id || 'job_workforce_clean_882'}`,
-      icon: Sparkles,
-      badge: '9 Agents',
-    },
+    { label: 'Cleaning', path: dsPath('cleaning'), icon: Sparkles },
     { label: 'Agent Performance', path: '/agents', icon: Activity },
     {
       label: 'Analytics',
-      path: `/analytics/${selectedDataset?.id || 'ds_workforce_01'}`,
+      path: dsPath('analytics'),
       icon: BarChart3,
     },
     {
       label: 'Visualizations',
-      path: `/visualizations/${selectedDataset?.id || 'ds_workforce_01'}`,
+      path: dsPath('visualizations'),
       icon: PieChart,
     },
     {
       label: 'Insights',
-      path: `/insights/${selectedDataset?.id || 'ds_workforce_01'}`,
+      path: dsPath('insights'),
       icon: Lightbulb,
     },
     { label: 'AURA AI', path: '/ai-analyst', icon: Bot, highlight: true },
@@ -152,20 +156,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         <div className="p-3 border-t border-slate-100 bg-slate-50/60">
           <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200/80 shadow-2xs">
             <div className="flex items-center gap-2.5 min-w-0">
-              <img
-                src={
-                  user?.avatar ||
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=160&q=80'
-                }
-                alt={user?.name || 'User'}
-                className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"
-              />
+              {user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.name || 'User'}
+                  className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 border border-blue-200 flex items-center justify-center text-xs font-bold shrink-0">
+                  {(user?.name || user?.email || '?').charAt(0).toUpperCase()}
+                </div>
+              )}
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-slate-800 truncate">
-                  {user?.name || 'Rahul Sharma'}
+                  {user?.name || 'Signed in'}
                 </p>
                 <p className="text-[11px] text-slate-500 truncate">
-                  {user?.email || 'rahul.aiml@aura.io'}
+                  {user?.email || ''}
                 </p>
               </div>
             </div>

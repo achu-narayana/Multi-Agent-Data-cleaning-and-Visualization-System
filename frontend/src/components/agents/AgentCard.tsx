@@ -11,7 +11,6 @@ import {
   BrainCircuit,
   Clock,
   Database,
-  ArrowRight,
 } from 'lucide-react'
 import { AgentInfo, AgentType } from '@/types'
 import { StatusBadge } from '@/components/ui/StatusBadge'

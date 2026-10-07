@@ -1,50 +1,67 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { PieChart, Sparkles, Filter, Layers } from 'lucide-react'
-import { useDataset } from '@/context/DatasetContext'
+import { PieChart } from 'lucide-react'
+import { useRouteDataset } from '@/context/useDataset'
 import { visualizationApi } from '@/api/visualizationApi'
+import { getErrorMessage, isNotFound } from '@/api/client'
 import { ChartCard } from '@/components/visualizations/ChartCard'
 import { LoadingState } from '@/components/ui/LoadingState'
-import { VisualizationItem, ChartType } from '@/types'
-import { mockVisualizations } from '@/services/mock/mockData'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { NotProcessedState } from '@/components/ui/NotProcessedState'
+import { useApiData } from '@/hooks/useApiData'
 
 export const VisualizationsPage: React.FC = () => {
   const { datasetId } = useParams<{ datasetId: string }>()
-  const { selectedDataset } = useDataset()
-  const [visualizations, setVisualizations] = useState<VisualizationItem[]>(mockVisualizations)
+  const { dataset } = useRouteDataset(datasetId)
   const [filterType, setFilterType] = useState<string>('all')
-  const [isLoading, setIsLoading] = useState(false)
+  const { data, error, isLoading, reload } = useApiData(datasetId || null, () =>
+    visualizationApi.getVisualizations(datasetId!)
+  )
 
-  useEffect(() => {
-    const fetchVisualizations = async () => {
-      setIsLoading(true)
-      try {
-        const data = await visualizationApi.getVisualizations(datasetId || selectedDataset.id)
-        setVisualizations(data)
-      } finally {
-        setIsLoading(false)
-      }
+  const visualizations = data || []
+  const chartTypes = ['all', ...Array.from(new Set(visualizations.map((v) => v.chartType)))]
+  const activeFilter = chartTypes.includes(filterType) ? filterType : 'all'
+  const filteredCharts = visualizations.filter(
+    (item) => activeFilter === 'all' || item.chartType === activeFilter
+  )
+
+  const renderBody = () => {
+    if (isLoading && !data) {
+      return <LoadingState title="Loading visualizations..." />
     }
-    fetchVisualizations()
-  }, [datasetId, selectedDataset.id])
-
-  const filteredCharts = visualizations.filter((item) => {
-    if (filterType === 'all') return true
-    return item.chartType === filterType
-  })
-
-  if (isLoading) {
+    if (error) {
+      // 404 = not processed yet (or dataset not found) per API contract.
+      if (isNotFound(error) && datasetId && dataset) {
+        return <NotProcessedState datasetId={datasetId} what="Visualizations" />
+      }
+      return (
+        <ErrorState
+          title="Could not load visualizations"
+          message={getErrorMessage(error)}
+          onRetry={reload}
+        />
+      )
+    }
+    if (visualizations.length === 0) {
+      return (
+        <EmptyState
+          title="No visualizations"
+          description="The Visualization Agent did not produce any charts for this dataset."
+        />
+      )
+    }
     return (
-      <LoadingState
-        title="Generating intelligent visualizations..."
-        subtitle="Visualization Agent is analyzing cardinality and generating optimal charts"
-      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {filteredCharts.map((item) => (
+          <ChartCard key={item.id} item={item} />
+        ))}
+      </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -59,35 +76,31 @@ export const VisualizationsPage: React.FC = () => {
             Intelligent Visualizations
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Visualizations recommended by the Visualization Agent based on variable type, variance,
-            and information density.
+            Charts recommended by the Visualization Agent for{' '}
+            <span className="font-semibold text-slate-700">{dataset?.name || datasetId}</span>.
           </p>
         </div>
 
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1.5 p-1 rounded-lg bg-slate-100/80 border border-slate-200 text-xs">
-          {['all', 'scatter', 'bar', 'line', 'histogram', 'box'].map((type) => (
-            <button
-              key={type}
-              onClick={() => setFilterType(type)}
-              className={`px-2.5 py-1 rounded-md font-medium capitalize transition-colors cursor-pointer ${
-                filterType === type
-                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {type}
-            </button>
-          ))}
-        </div>
+        {visualizations.length > 0 && (
+          <div className="flex items-center gap-1.5 p-1 rounded-lg bg-slate-100/80 border border-slate-200 text-xs">
+            {chartTypes.map((type) => (
+              <button
+                key={type}
+                onClick={() => setFilterType(type)}
+                className={`px-2.5 py-1 rounded-md font-medium capitalize transition-colors cursor-pointer ${
+                  activeFilter === type
+                    ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {filteredCharts.map((item) => (
-          <ChartCard key={item.id} item={item} />
-        ))}
-      </div>
+      {renderBody()}
     </div>
   )
 }

@@ -1,54 +1,74 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Lightbulb, Sparkles, Bot, Filter, ArrowRight } from 'lucide-react'
-import { useDataset } from '@/context/DatasetContext'
+import { Lightbulb, Bot, ArrowRight } from 'lucide-react'
+import { useRouteDataset } from '@/context/useDataset'
 import { insightApi } from '@/api/insightApi'
+import { getErrorMessage, isNotFound } from '@/api/client'
 import { InsightCard } from '@/components/insights/InsightCard'
 import { LoadingState } from '@/components/ui/LoadingState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { NotProcessedState } from '@/components/ui/NotProcessedState'
 import { Button } from '@/components/ui/Button'
-import { InsightItem } from '@/types'
-import { mockInsights } from '@/services/mock/mockData'
+import { useApiData } from '@/hooks/useApiData'
+
+const CATEGORIES = ['all', 'Correlation', 'Distribution', 'Data Quality', 'Anomaly', 'Trend']
 
 export const InsightsPage: React.FC = () => {
   const { datasetId } = useParams<{ datasetId: string }>()
   const navigate = useNavigate()
-  const { selectedDataset } = useDataset()
-  const [insights, setInsights] = useState<InsightItem[]>(mockInsights)
+  const { dataset } = useRouteDataset(datasetId)
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
-  const [isLoading, setIsLoading] = useState(false)
+  const { data, error, isLoading, reload } = useApiData(datasetId || null, () =>
+    insightApi.getInsights(datasetId!)
+  )
 
-  useEffect(() => {
-    const fetchInsights = async () => {
-      setIsLoading(true)
-      try {
-        const data = await insightApi.getInsights(datasetId || selectedDataset.id)
-        setInsights(data)
-      } finally {
-        setIsLoading(false)
-      }
+  const insights = data || []
+  const filteredInsights = insights.filter(
+    (ins) => selectedCategory === 'all' || ins.category === selectedCategory
+  )
+
+  const renderBody = () => {
+    if (isLoading && !data) {
+      return <LoadingState title="Loading insights..." />
     }
-    fetchInsights()
-  }, [datasetId, selectedDataset.id])
-
-  const categories = ['all', 'Correlation', 'Distribution', 'Data Quality', 'Anomaly', 'Trend']
-
-  const filteredInsights = insights.filter((ins) => {
-    if (selectedCategory === 'all') return true
-    return ins.category === selectedCategory
-  })
-
-  if (isLoading) {
+    if (error) {
+      if (isNotFound(error) && datasetId && dataset) {
+        return <NotProcessedState datasetId={datasetId} what="Insights" />
+      }
+      return (
+        <ErrorState title="Could not load insights" message={getErrorMessage(error)} onRetry={reload} />
+      )
+    }
+    if (insights.length === 0) {
+      return (
+        <EmptyState
+          icon={<Lightbulb className="w-6 h-6" />}
+          title="No insights available"
+          description="The Insight Agent returned no findings for this dataset (the AI model may have been unavailable during processing). Re-run the pipeline to try again."
+        />
+      )
+    }
+    if (filteredInsights.length === 0) {
+      return (
+        <EmptyState
+          icon={<Lightbulb className="w-6 h-6" />}
+          title="No insights in this category"
+          description="Choose another category to see more findings."
+        />
+      )
+    }
     return (
-      <LoadingState
-        title="Generating insights..."
-        subtitle="Insight Agent is running Bayesian hypothesis checks and correlation clustering"
-      />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {filteredInsights.map((insight) => (
+          <InsightCard key={insight.id} insight={insight} />
+        ))}
+      </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -59,12 +79,10 @@ export const InsightsPage: React.FC = () => {
               Insight Agent Signals
             </span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 mt-1">
-            AI-Generated Insights
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 mt-1">AI-Generated Insights</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Key statistical findings, anomalies, and business trends surfaced autonomously by the
-            Insight Agent.
+            Findings and recommendations for{' '}
+            <span className="font-semibold text-slate-700">{dataset?.name || datasetId}</span>.
           </p>
         </div>
 
@@ -79,29 +97,25 @@ export const InsightsPage: React.FC = () => {
         </Button>
       </div>
 
-      {/* Category Filter Chips */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-        {categories.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setSelectedCategory(cat)}
-            className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors cursor-pointer whitespace-nowrap ${
-              selectedCategory === cat
-                ? 'bg-blue-600 text-white font-semibold shadow-2xs'
-                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            {cat === 'all' ? 'All Insights' : cat}
-          </button>
-        ))}
-      </div>
+      {insights.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setSelectedCategory(cat)}
+              className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                selectedCategory === cat
+                  ? 'bg-blue-600 text-white font-semibold shadow-2xs'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {cat === 'all' ? 'All Insights' : cat}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Insights Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {filteredInsights.map((insight) => (
-          <InsightCard key={insight.id} insight={insight} />
-        ))}
-      </div>
+      {renderBody()}
     </div>
   )
 }

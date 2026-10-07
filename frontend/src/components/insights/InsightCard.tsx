@@ -6,10 +6,8 @@ import {
   AlertTriangle,
   Lightbulb,
   ArrowUpRight,
-  Sparkles,
 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
 import { InsightItem, InsightCategory } from '@/types'
 import { cn } from '@/utils/cn'
 

@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, Navigate } from 'react-router-dom'
 import { Cpu, ArrowRight, AlertCircle } from 'lucide-react'
-import { useAuth } from '@/context/AuthContext'
+import { useAuth } from '@/context/useAuth'
+import { getErrorMessage } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 
 export const RegisterPage: React.FC = () => {
@@ -10,7 +11,7 @@ export const RegisterPage: React.FC = () => {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const { register, isLoading } = useAuth()
+  const { register, isLoading, isAuthenticated } = useAuth()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,11 +34,15 @@ export const RegisterPage: React.FC = () => {
     }
 
     try {
-      await register({ fullName, email, password })
-      navigate('/dashboard')
-    } catch (err: any) {
-      setError(err.message || 'Registration failed. Please try again.')
+      await register({ fullName: fullName.trim(), email: email.trim(), password })
+      navigate('/dashboard', { replace: true })
+    } catch (err) {
+      setError(getErrorMessage(err, 'Registration failed. Please try again.'))
     }
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/dashboard" replace />
   }
 
   return (

@@ -1,6 +1,7 @@
 # Environment variables
 .env
 .env.*
+!.env.example
 
 # Python
 venv/
@@ -14,8 +15,11 @@ frontend/node_modules/
 frontend/dist/
 npm-debug.log*
 # Uploaded/generated datasets
-backend/uploads/*.csv
-backend/cleaned/*.csv
+backend/uploads/
+backend/cleaned/
+
+# Python tooling
+.pytest_cache/
 
 # TypeScript build cache
 *.tsbuildinfo

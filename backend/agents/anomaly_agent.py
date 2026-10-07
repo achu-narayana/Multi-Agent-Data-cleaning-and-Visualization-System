@@ -48,7 +48,7 @@ def is_identifier_column(
     ID
     """
 
-    name = column.lower().strip()
+    name = str(column).lower().strip()
 
     if (
         name == "id"
@@ -146,7 +146,8 @@ def detect_anomalies(
 
     Detection methods:
 
-    1. Domain-aware validation for recognized columns.
+    1. Domain-aware validation for recognized columns
+       (reported as business_rule_violation).
     2. Generic negative-value detection for naturally
        non-negative measurements.
     3. Invalid numeric values such as infinity.
@@ -221,7 +222,7 @@ def detect_anomalies(
         anomalies.append(
             {
                 "column": column,
-                "type": "domain_rule_violation",
+                "type": "business_rule_violation",
                 "count": invalid_count,
                 "rule": rules,
                 "affected_rows": affected_rows,
@@ -379,12 +380,22 @@ def detect_anomalies(
             q3 + 1.5 * iqr
         )
 
-        outlier_mask = (
-            (df[column] < lower_bound)
-            | (
-                df[column]
-                > upper_bound
+        # Compare against the finite values only, so infinite values
+        # are reported once (as invalid) and not again as outliers.
+        finite_values = (
+            pd.to_numeric(
+                df[column],
+                errors="coerce",
             )
+            .replace(
+                [np.inf, -np.inf],
+                np.nan,
+            )
+        )
+
+        outlier_mask = (
+            (finite_values < lower_bound)
+            | (finite_values > upper_bound)
         )
 
         outlier_count = int(

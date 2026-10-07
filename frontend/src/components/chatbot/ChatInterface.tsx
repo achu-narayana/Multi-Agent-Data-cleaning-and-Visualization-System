@@ -1,67 +1,82 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Send, Bot, User, Sparkles, Database, Loader2, RefreshCw } from 'lucide-react'
+import { Send, Bot, User, Database, Loader2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { ChatMessage } from '@/types'
-import { chatbotApi } from '@/api/chatbotApi'
-import {
-  mockChatInitialMessages,
-  mockChatSuggestedQuestions,
-} from '@/services/mock/mockData'
+import { chatbotApi, ChatHistoryItem } from '@/api/chatbotApi'
+import { getErrorMessage } from '@/api/client'
 
 interface ChatInterfaceProps {
   datasetName: string
   datasetId: string
 }
 
+const DEFAULT_SUGGESTIONS = [
+  'What are the biggest data-quality problems?',
+  'What changed after cleaning?',
+  'Why were rows removed?',
+  'Show me the important insights.',
+]
+
+const MAX_HISTORY = 12
+
+const welcomeMessage = (datasetName: string): ChatMessage => ({
+  id: 'welcome',
+  sender: 'aura',
+  text: `Hi! I'm AURA, your AI data analyst. Ask me anything about "${datasetName}" - its quality issues, what the cleaning agents changed, or the key insights.`,
+  timestamp: '',
+  suggestedQuestions: DEFAULT_SUGGESTIONS.slice(0, 3),
+})
+
+const nowLabel = () =>
+  new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ datasetName, datasetId }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>(mockChatInitialMessages)
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [welcomeMessage(datasetName)])
   const [inputText, setInputText] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  const nextId = useRef(1)
 
   useEffect(() => {
-    scrollToBottom()
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isTyping])
 
   const handleSend = async (textToSend?: string) => {
-    const text = textToSend || inputText
-    if (!text.trim() || isTyping) return
+    const text = (textToSend ?? inputText).trim()
+    if (!text || isTyping) return
+
+    const history: ChatHistoryItem[] = messages
+      .filter((m) => m.id !== 'welcome' && !m.id.startsWith('err_'))
+      .slice(-MAX_HISTORY)
+      .map((m) => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }))
 
     const userMessage: ChatMessage = {
-      id: `msg_user_${Date.now()}`,
+      id: `msg_user_${nextId.current++}`,
       sender: 'user',
-      text: text.trim(),
-      timestamp: 'Just now',
+      text,
+      timestamp: nowLabel(),
     }
 
     setMessages((prev) => [...prev, userMessage])
-    if (!textToSend) setInputText('')
+    if (textToSend === undefined) setInputText('')
+    setError(null)
     setIsTyping(true)
 
     try {
-      const response = await chatbotApi.sendMessage({
-        message: text.trim(),
-        datasetId,
-      })
-
-      // Simulate human-like thinking delay
-      setTimeout(() => {
-        const auraMessage: ChatMessage = {
-          id: `msg_aura_${Date.now()}`,
-          sender: 'aura',
-          text: response.message,
-          timestamp: 'Just now',
-          suggestedQuestions: response.suggestedQuestions,
-        }
-        setMessages((prev) => [...prev, auraMessage])
-        setIsTyping(false)
-      }, 700)
-    } catch {
+      const response = await chatbotApi.sendMessage({ message: text, datasetId, history })
+      const auraMessage: ChatMessage = {
+        id: `msg_aura_${nextId.current++}`,
+        sender: 'aura',
+        text: response.message,
+        timestamp: nowLabel(),
+        suggestedQuestions: response.suggestedQuestions || [],
+      }
+      setMessages((prev) => [...prev, auraMessage])
+    } catch (err) {
+      setError(getErrorMessage(err, 'The AI analyst is unavailable right now.'))
+    } finally {
       setIsTyping(false)
     }
   }
@@ -69,12 +84,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ datasetName, datas
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 
   const handleResetChat = () => {
-    setMessages(mockChatInitialMessages)
+    setMessages([welcomeMessage(datasetName)])
+    setError(null)
   }
 
   return (
@@ -89,7 +105,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ datasetName, datas
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-bold text-slate-900">AURA AI Analyst</h3>
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Online
+                AI
               </span>
             </div>
             <p className="text-xs text-slate-500">Ask questions about your dataset</p>
@@ -151,7 +167,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ datasetName, datas
                     {msg.suggestedQuestions.map((q) => (
                       <button
                         key={q}
-                        onClick={() => handleSend(q)}
+                        onClick={() => void handleSend(q)}
                         className="text-[11px] px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-700 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50/50 transition-colors text-left cursor-pointer"
                       >
                         {q}
@@ -177,6 +193,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ datasetName, datas
           </div>
         )}
 
+        {error && (
+          <div className="flex items-start gap-2 max-w-2xl p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -185,10 +208,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ datasetName, datas
         <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0">
           Suggested:
         </span>
-        {mockChatSuggestedQuestions.map((suggestion) => (
+        {DEFAULT_SUGGESTIONS.map((suggestion) => (
           <button
             key={suggestion}
-            onClick={() => handleSend(suggestion)}
+            disabled={isTyping}
+            onClick={() => void handleSend(suggestion)}
             className="text-[11px] px-2.5 py-1 rounded-full bg-slate-50 border border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 whitespace-nowrap transition-colors cursor-pointer"
           >
             {suggestion}
@@ -212,7 +236,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ datasetName, datas
             variant="primary"
             size="md"
             disabled={!inputText.trim() || isTyping}
-            onClick={() => handleSend()}
+            onClick={() => void handleSend()}
             leftIcon={<Send className="w-4 h-4" />}
           >
             Send

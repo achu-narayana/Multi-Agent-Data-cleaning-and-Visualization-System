@@ -1,18 +1,26 @@
 import React, { useState, useRef } from 'react'
-import { UploadCloud, FileSpreadsheet, X, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react'
+import { UploadCloud, FileSpreadsheet, X, AlertTriangle, ArrowRight } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Dataset } from '@/types'
+import { getErrorMessage } from '@/api/client'
 
 interface DatasetUploadProps {
+  /** Performs the real upload (POST /datasets/upload) and resolves to the created dataset. */
+  onUpload: (file: File) => Promise<Dataset>
   onUploadSuccess?: (dataset: Dataset) => void
   onCancel?: () => void
 }
 
-export const DatasetUpload: React.FC<DatasetUploadProps> = ({ onUploadSuccess, onCancel }) => {
+const VALID_EXTENSIONS = ['.csv', '.xlsx', '.xls']
+const MAX_SIZE_BYTES = 50 * 1024 * 1024
+
+const formatSize = (bytes: number) =>
+  bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(2)} MB` : `${(bytes / 1024).toFixed(1)} KB`
+
+export const DatasetUpload: React.FC<DatasetUploadProps> = ({ onUpload, onUploadSuccess, onCancel }) => {
   const [dragActive, setDragActive] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [uploadProgress, setUploadProgress] = useState(0)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -29,15 +37,19 @@ export const DatasetUpload: React.FC<DatasetUploadProps> = ({ onUploadSuccess, o
 
   const validateAndSetFile = (file: File) => {
     setError(null)
-    const validExtensions = ['.csv', '.xlsx', '.xls']
-    const hasValidExt = validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext))
+    const hasValidExt = VALID_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))
 
     if (!hasValidExt) {
-      setError('Unsupported file type. Please upload a CSV or XLSX file.')
+      setError('Unsupported file type. Please upload a CSV, XLSX or XLS file.')
       return
     }
 
-    if (file.size > 50 * 1024 * 1024) {
+    if (file.size === 0) {
+      setError('The selected file is empty. Please choose a CSV, XLSX or XLS file with data.')
+      return
+    }
+
+    if (file.size > MAX_SIZE_BYTES) {
       setError('File is too large. Maximum supported file size is 50 MB.')
       return
     }
@@ -60,51 +72,27 @@ export const DatasetUpload: React.FC<DatasetUploadProps> = ({ onUploadSuccess, o
     }
   }
 
-  const handleAnalyze = () => {
-    if (!selectedFile) return
+  const handleAnalyze = async () => {
+    if (!selectedFile || isUploading) return
 
     setIsUploading(true)
-    setUploadProgress(15)
-
-    // Simulate progress
-    const timer1 = setTimeout(() => setUploadProgress(45), 300)
-    const timer2 = setTimeout(() => setUploadProgress(80), 700)
-    const timer3 = setTimeout(() => {
-      setUploadProgress(100)
+    setError(null)
+    try {
+      const dataset = await onUpload(selectedFile)
+      setSelectedFile(null)
+      if (inputRef.current) inputRef.current.value = ''
+      onUploadSuccess?.(dataset)
+    } catch (err) {
+      setError(
+        getErrorMessage(err, 'Upload failed. Please upload a valid CSV, XLSX or XLS file.')
+      )
+    } finally {
       setIsUploading(false)
-
-      const newDataset: Dataset = {
-        id: `ds_${Date.now()}`,
-        name: selectedFile.name,
-        size: `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`,
-        rowCount: Math.floor(Math.random() * 8000) + 2000,
-        columnCount: 16,
-        format: selectedFile.name.endsWith('.xlsx') ? 'xlsx' : 'csv',
-        uploadedAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
-        qualityScore: 68.4,
-        status: 'raw',
-        missingValues: 342,
-        duplicateRows: 185,
-        numericalColumns: 8,
-        categoricalColumns: 6,
-        dateColumns: 2,
-        columns: ['ID', 'Name', 'Age', 'Department', 'Role', 'Salary', 'Experience', 'Joining Date'],
-      }
-
-      if (onUploadSuccess) onUploadSuccess(newDataset)
-    }, 1100)
-
-    return () => {
-      clearTimeout(timer1)
-      clearTimeout(timer2)
-      clearTimeout(timer3)
     }
   }
 
   const handleReset = () => {
     setSelectedFile(null)
-    setUploadProgress(0)
-    setIsUploading(false)
     setError(null)
     if (inputRef.current) inputRef.current.value = ''
     if (onCancel) onCancel()
@@ -115,7 +103,7 @@ export const DatasetUpload: React.FC<DatasetUploadProps> = ({ onUploadSuccess, o
       <div className="mb-4">
         <h3 className="text-base font-semibold text-slate-900">Upload Dataset</h3>
         <p className="text-xs text-slate-500 mt-0.5">
-          Select or drop your raw CSV or XLSX file. The profiling agent will inspect column distributions immediately.
+          Select or drop your raw CSV, XLSX or XLS file. It is uploaded and profiled by the backend.
         </p>
       </div>
 
@@ -146,7 +134,7 @@ export const DatasetUpload: React.FC<DatasetUploadProps> = ({ onUploadSuccess, o
           <h4 className="text-sm font-semibold text-slate-800">
             Click to browse or drag and drop your dataset
           </h4>
-          <p className="text-xs text-slate-500 mt-1">Supported file formats: CSV, XLSX (Up to 50 MB)</p>
+          <p className="text-xs text-slate-500 mt-1">Supported file formats: CSV, XLSX, XLS (up to 50 MB)</p>
           <div className="mt-4">
             <Button variant="outline" size="sm" type="button">
               Choose File
@@ -164,7 +152,7 @@ export const DatasetUpload: React.FC<DatasetUploadProps> = ({ onUploadSuccess, o
               <div>
                 <p className="text-sm font-semibold text-slate-900">{selectedFile.name}</p>
                 <p className="text-xs text-slate-500">
-                  {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • {selectedFile.type || 'text/csv'}
+                  {formatSize(selectedFile.size)}
                 </p>
               </div>
             </div>
@@ -180,18 +168,14 @@ export const DatasetUpload: React.FC<DatasetUploadProps> = ({ onUploadSuccess, o
             )}
           </div>
 
-          {/* Upload Progress */}
+          {/* Upload status (fetch exposes no upload progress, so this is indeterminate) */}
           {isUploading && (
             <div className="space-y-1.5 p-3 rounded-lg bg-blue-50/50 border border-blue-100">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-blue-800">Uploading and inspecting schema...</span>
-                <span className="font-bold text-blue-800">{uploadProgress}%</span>
+                <span className="font-medium text-blue-800">Uploading and profiling dataset...</span>
               </div>
               <div className="w-full h-2 rounded-full bg-blue-100 overflow-hidden">
-                <div
-                  className="h-full bg-blue-600 transition-all duration-300 rounded-full"
-                  style={{ width: `${uploadProgress}%` }}
-                />
+                <div className="h-full w-1/3 bg-blue-600 rounded-full animate-pulse" />
               </div>
             </div>
           )}

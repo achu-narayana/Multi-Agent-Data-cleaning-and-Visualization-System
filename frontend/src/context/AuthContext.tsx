@@ -1,119 +1,90 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { User } from '@/types'
 import { authApi, LoginRequest, RegisterRequest } from '@/api/authApi'
-import { mockCurrentUser } from '@/services/mock/mockData'
-
-interface AuthContextType {
-  user: User | null
-  token: string | null
-  isAuthenticated: boolean
-  isLoading: boolean
-  login: (credentials: LoginRequest) => Promise<void>
-  register: (data: RegisterRequest) => Promise<void>
-  logout: () => void
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined)
+import { getAuthToken, setAuthToken, UNAUTHORIZED_EVENT } from '@/api/client'
+import { AuthContext } from './useAuth'
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('aura_user')
-    if (saved) {
-      try {
-        return JSON.parse(saved)
-      } catch {
-        return mockCurrentUser
-      }
-    }
-    // Default to mock logged-in user so the evaluation experience is smooth
-    return mockCurrentUser
-  })
-
-  const [token, setToken] = useState<string | null>(() => {
-    return localStorage.getItem('aura_auth_token') || 'mock_jwt_aura_token_aiml_2026'
-  })
-
+  // Always start logged-out; a stored token only counts once GET /auth/me validates it.
+  const [token, setToken] = useState<string | null>(() => getAuthToken())
+  const [user, setUser] = useState<User | null>(null)
+  const [isInitializing, setIsInitializing] = useState<boolean>(() => !!getAuthToken())
   const [isLoading, setIsLoading] = useState<boolean>(false)
 
-  // Listen for unauthorized 401 events from the API client
-  useEffect(() => {
-    const handleUnauthorized = () => {
-      setUser(null)
-      setToken(null)
-      localStorage.removeItem('aura_user')
-      localStorage.removeItem('aura_auth_token')
-    }
-
-    window.addEventListener('aura:unauthorized', handleUnauthorized)
-    return () => window.removeEventListener('aura:unauthorized', handleUnauthorized)
+  const clearSession = useCallback(() => {
+    setAuthToken(null)
+    setToken(null)
+    setUser(null)
   }, [])
 
+  // Validate a persisted token once on startup.
   useEffect(() => {
-    if (user) {
-      localStorage.setItem('aura_user', JSON.stringify(user))
-    } else {
-      localStorage.removeItem('aura_user')
-    }
-  }, [user])
+    const stored = getAuthToken()
+    if (!stored) return
 
+    let cancelled = false
+    authApi
+      .getMe()
+      .then((me) => {
+        if (!cancelled) setUser(me)
+      })
+      .catch(() => {
+        if (!cancelled) clearSession()
+      })
+      .finally(() => {
+        if (!cancelled) setIsInitializing(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [clearSession])
+
+  // API client dispatches this on any 401 to an authenticated request.
+  // Clearing the session makes ProtectedRoute redirect to /login.
   useEffect(() => {
-    if (token) {
-      localStorage.setItem('aura_auth_token', token)
-    } else {
-      localStorage.removeItem('aura_auth_token')
-    }
-  }, [token])
+    const handleUnauthorized = () => clearSession()
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized)
+  }, [clearSession])
 
-  const login = async (credentials: LoginRequest) => {
+  const login = useCallback(async (credentials: LoginRequest) => {
     setIsLoading(true)
     try {
       const res = await authApi.login(credentials)
-      setUser(res.user)
+      setAuthToken(res.token)
       setToken(res.token)
+      setUser(res.user)
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [])
 
-  const register = async (data: RegisterRequest) => {
+  const register = useCallback(async (data: RegisterRequest) => {
     setIsLoading(true)
     try {
       const res = await authApi.register(data)
-      setUser(res.user)
+      setAuthToken(res.token)
       setToken(res.token)
+      setUser(res.user)
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [])
 
-  const logout = () => {
-    setUser(null)
-    setToken(null)
-    localStorage.removeItem('aura_user')
-    localStorage.removeItem('aura_auth_token')
-  }
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        isAuthenticated: !!token && !!user,
-        isLoading,
-        login,
-        register,
-        logout,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      token,
+      isAuthenticated: !!token && !!user,
+      isInitializing,
+      isLoading,
+      login,
+      register,
+      logout: clearSession,
+    }),
+    [user, token, isInitializing, isLoading, login, register, clearSession]
   )
-}
 
-export const useAuth = () => {
-  const context = useContext(AuthContext)
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider')
-  }
-  return context
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

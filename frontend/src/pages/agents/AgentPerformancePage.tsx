@@ -1,28 +1,23 @@
-import React, { useState, useEffect } from 'react'
-import { Activity, Cpu, Clock, CheckCircle2, RefreshCw } from 'lucide-react'
-import { useDataset } from '@/context/DatasetContext'
+import React from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Activity, RefreshCw } from 'lucide-react'
 import { AgentPerformanceTable } from '@/components/agents/AgentPerformanceTable'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { LoadingState } from '@/components/ui/LoadingState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { agentApi } from '@/api/agentApi'
-import { AgentInfo } from '@/types'
+import { getErrorMessage } from '@/api/client'
+import { useApiData } from '@/hooks/useApiData'
 
 export const AgentPerformancePage: React.FC = () => {
-  const { activeJob } = useDataset()
-  const [agents, setAgents] = useState<AgentInfo[]>(activeJob.agents)
-  const [isRefreshing, setIsRefreshing] = useState(false)
+  const navigate = useNavigate()
+  const { data, error, isLoading, reload } = useApiData('agents-performance', () =>
+    agentApi.getAgentPerformance()
+  )
+  const agents = data || []
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true)
-    try {
-      const data = await agentApi.getAgentPerformance()
-      setAgents(data)
-    } finally {
-      setIsRefreshing(false)
-    }
-  }
-
-  // Summary calculations
   const totalExecutionTime = agents
     .reduce((acc, curr) => acc + (curr.executionTime || 0), 0)
     .toFixed(2)
@@ -31,9 +26,11 @@ export const AgentPerformancePage: React.FC = () => {
     .filter((a) => a.type !== 'validation' && a.type !== 'orchestrator' && a.type !== 'profiling')
     .reduce((acc, curr) => acc + (curr.recordsAffected || 0), 0)
 
+  const completed = agents.filter((a) => a.status === 'completed').length
+  const successRatio = agents.length > 0 ? Math.round((completed / agents.length) * 100) : 0
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -48,65 +45,85 @@ export const AgentPerformancePage: React.FC = () => {
             Agent Performance
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Real-time execution latency profiling, throughput metrics, and workload distribution.
+            Aggregated over all of your processed datasets: average execution time and total
+            records affected per agent.
           </p>
         </div>
 
         <Button
           variant="outline"
           size="sm"
-          isLoading={isRefreshing}
-          onClick={handleRefresh}
+          isLoading={isLoading}
+          onClick={reload}
           leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
         >
-          Refresh Telemetry
+          Refresh
         </Button>
       </div>
 
-      {/* Metric Highlights */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className="p-4 bg-white">
-          <span className="text-[11px] font-medium text-slate-400 block uppercase tracking-wider">
-            Total Pipeline Latency
-          </span>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-bold text-slate-900 font-mono">
-              {totalExecutionTime}s
-            </span>
-            <span className="text-xs text-emerald-600 font-medium">Under SLA (30s)</span>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1">Sum of sequential sub-agent executions</p>
-        </Card>
+      {isLoading && !data ? (
+        <LoadingState title="Loading agent telemetry..." />
+      ) : error ? (
+        <ErrorState
+          title="Could not load agent performance"
+          message={getErrorMessage(error)}
+          onRetry={reload}
+        />
+      ) : agents.length === 0 ? (
+        <EmptyState
+          title="No agent telemetry yet"
+          description="Agent metrics appear after you run the cleaning pipeline on at least one dataset."
+          actionLabel="Go to Datasets"
+          onAction={() => navigate('/datasets')}
+        />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card className="p-4 bg-white">
+              <span className="text-[11px] font-medium text-slate-400 block uppercase tracking-wider">
+                Average Pipeline Latency
+              </span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold text-slate-900 font-mono">
+                  {totalExecutionTime}s
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Sum of each agent&apos;s average execution time
+              </p>
+            </Card>
 
-        <Card className="p-4 bg-white">
-          <span className="text-[11px] font-medium text-slate-400 block uppercase tracking-wider">
-            Total Records Remediated
-          </span>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-bold text-blue-600 font-mono">
-              {totalRecordsRemediated.toLocaleString()}
-            </span>
-            <span className="text-xs text-slate-500">cells & rows modified</span>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Handled by Imputation, Deduplication & Normalization
-          </p>
-        </Card>
+            <Card className="p-4 bg-white">
+              <span className="text-[11px] font-medium text-slate-400 block uppercase tracking-wider">
+                Total Records Affected
+              </span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold text-blue-600 font-mono">
+                  {totalRecordsRemediated.toLocaleString()}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Excludes profiling and validation agents
+              </p>
+            </Card>
 
-        <Card className="p-4 bg-white">
-          <span className="text-[11px] font-medium text-slate-400 block uppercase tracking-wider">
-            Agent Success Ratio
-          </span>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-bold text-emerald-600 font-mono">100%</span>
-            <span className="text-xs text-emerald-700 font-medium">9 / 9 Healthy</span>
+            <Card className="p-4 bg-white">
+              <span className="text-[11px] font-medium text-slate-400 block uppercase tracking-wider">
+                Agents Completed
+              </span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold text-emerald-600 font-mono">{successRatio}%</span>
+                <span className="text-xs text-slate-500 font-medium">
+                  {completed} / {agents.length}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">Agents reporting status “completed”</p>
+            </Card>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">Zero worker crashes or DAG exceptions</p>
-        </Card>
-      </div>
 
-      {/* Main Agent Performance Table & Latency Chart */}
-      <AgentPerformanceTable agents={agents} />
+          <AgentPerformanceTable agents={agents} />
+        </>
+      )}
     </div>
   )
 }

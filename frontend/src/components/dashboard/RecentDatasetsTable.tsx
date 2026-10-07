@@ -43,6 +43,13 @@ export const RecentDatasetsTable: React.FC<RecentDatasetsTableProps> = ({ datase
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
+            {datasets.length === 0 && (
+              <tr>
+                <td colSpan={6} className="py-8 text-center text-slate-400">
+                  No datasets uploaded yet.
+                </td>
+              </tr>
+            )}
             {datasets.map((dataset) => (
               <tr
                 key={dataset.id}
@@ -59,13 +66,13 @@ export const RecentDatasetsTable: React.FC<RecentDatasetsTableProps> = ({ datase
                         {dataset.name}
                       </p>
                       <p className="text-[11px] text-slate-400">
-                        {dataset.size} • {dataset.format.toUpperCase()}
+                        {dataset.size} • {(dataset.format || '').toUpperCase()}
                       </p>
                     </div>
                   </div>
                 </td>
                 <td className="py-3.5 px-4 font-medium text-slate-700">
-                  {dataset.rowCount.toLocaleString()} rows
+                  {(dataset.rowCount ?? 0).toLocaleString()} rows
                 </td>
                 <td className="py-3.5 px-4 text-slate-600">{dataset.columnCount} columns</td>
                 <td className="py-3.5 px-4">
@@ -101,7 +108,7 @@ export const RecentDatasetsTable: React.FC<RecentDatasetsTableProps> = ({ datase
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/cleaning/job_workforce_clean_882`)}
+                      onClick={() => navigate(`/cleaning/${dataset.id}`)}
                       leftIcon={<Sparkles className="w-3.5 h-3.5 text-blue-600" />}
                     >
                       Pipeline

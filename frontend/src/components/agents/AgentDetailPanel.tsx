@@ -3,7 +3,6 @@ import {
   X,
   Clock,
   Database,
-  CheckCircle2,
   AlertTriangle,
   Lightbulb,
   Zap,

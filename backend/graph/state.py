@@ -31,3 +31,6 @@ class DataCleaningState(TypedDict, total=False):
 
     # Errors encountered during processing
     errors: list[str]
+
+    # Timing and record counts for each agent run
+    agent_runs: list[dict[str, Any]]

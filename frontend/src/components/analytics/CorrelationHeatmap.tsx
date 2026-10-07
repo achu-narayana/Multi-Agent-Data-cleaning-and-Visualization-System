@@ -54,9 +54,9 @@ export const CorrelationHeatmap: React.FC<CorrelationHeatmapProps> = ({ columns,
                           className={`w-20 h-10 rounded-md flex items-center justify-center font-mono text-xs transition-transform hover:scale-105 shadow-2xs ${getCellColor(
                             val
                           )}`}
-                          title={`${columns[rIdx]} vs ${columns[cIdx]}: ${val.toFixed(2)}`}
+                          title={`${columns[rIdx]} vs ${columns[cIdx]}: ${typeof val === 'number' ? val.toFixed(2) : '—'}`}
                         >
-                          {val.toFixed(2)}
+                          {typeof val === 'number' ? val.toFixed(2) : '—'}
                         </div>
                       </td>
                     ))}

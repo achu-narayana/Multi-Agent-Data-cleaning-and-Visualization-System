@@ -1,4 +1,14 @@
+import numpy as np
 import pandas as pd
+
+from services.dataframe_utils import (
+    numeric_columns as get_numeric_columns,
+    safe_float,
+    text_columns,
+)
+
+
+HISTOGRAM_BINS = 10
 
 
 def is_identifier_column(df: pd.DataFrame, column: str) -> bool:
@@ -7,7 +17,7 @@ def is_identifier_column(df: pd.DataFrame, column: str) -> bool:
     meaningful analytical variables.
     """
 
-    name = column.lower().strip()
+    name = str(column).lower().strip()
 
     # Strong ID naming patterns
     if (
@@ -19,6 +29,20 @@ def is_identifier_column(df: pd.DataFrame, column: str) -> bool:
         return True
 
     return False
+
+
+def parse_dates(series: pd.Series) -> pd.Series:
+    try:
+        return pd.to_datetime(
+            series,
+            errors="coerce",
+            format="mixed",
+        )
+    except (TypeError, ValueError):
+        return pd.to_datetime(
+            series,
+            errors="coerce",
+        )
 
 
 def detect_date_columns(df: pd.DataFrame) -> list[str]:
@@ -49,7 +73,7 @@ def detect_date_columns(df: pd.DataFrame) -> list[str]:
         if pd.api.types.is_numeric_dtype(df[column]):
             continue
 
-        column_name = column.lower()
+        column_name = str(column).lower()
 
         # Only attempt parsing when the column name suggests a date
         if not any(
@@ -58,17 +82,7 @@ def detect_date_columns(df: pd.DataFrame) -> list[str]:
         ):
             continue
 
-        try:
-            parsed = pd.to_datetime(
-                df[column],
-                errors="coerce",
-                format="mixed",
-            )
-        except (TypeError, ValueError):
-            parsed = pd.to_datetime(
-                df[column],
-                errors="coerce",
-            )
+        parsed = parse_dates(df[column])
 
         # At least 70% of the values should be valid dates
         if parsed.notna().mean() >= 0.7:
@@ -77,34 +91,40 @@ def detect_date_columns(df: pd.DataFrame) -> list[str]:
     return date_columns
 
 
-def generate_visualizations(df: pd.DataFrame) -> list[dict]:
+def finite_numeric(series: pd.Series) -> pd.Series:
+    return (
+        pd.to_numeric(series, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+
+
+def format_bin_edge(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+
+    return f"{value:.2f}"
+
+
+def histogram_bins(values: pd.Series) -> list[dict]:
+    counts, edges = np.histogram(
+        values,
+        bins=min(HISTOGRAM_BINS, max(values.nunique(), 1)),
+    )
+
+    return [
+        {
+            "bin": f"{format_bin_edge(edges[i])}-{format_bin_edge(edges[i + 1])}",
+            "count": int(counts[i]),
+        }
+        for i in range(len(counts))
+    ]
+
+
+def select_columns(df: pd.DataFrame) -> dict[str, list[str]]:
     """
-    Automatically generate useful visualization specifications
-    for a tabular dataset.
-
-    Supported visualizations:
-
-    1. Numerical histograms
-    2. Categorical bar charts
-    3. Date-based line charts
-    4. Numerical correlation matrix
-
-    The function attempts to be dataset-independent and avoids
-    unnecessary visualizations for ID and high-cardinality columns.
+    Classify columns into numeric, categorical and date columns
+    that are worth visualizing.
     """
-
-    visualizations = []
-
-    # ---------------------------------------------------------
-    # Basic validation
-    # ---------------------------------------------------------
-
-    if df.empty:
-        return visualizations
-
-    # ---------------------------------------------------------
-    # Identify ID columns
-    # ---------------------------------------------------------
 
     identifier_columns = [
         column
@@ -112,27 +132,25 @@ def generate_visualizations(df: pd.DataFrame) -> list[dict]:
         if is_identifier_column(df, column)
     ]
 
-    # ---------------------------------------------------------
-    # Identify numerical columns
-    # ---------------------------------------------------------
-
     numeric_columns = [
         column
-        for column in df.select_dtypes(include="number").columns
+        for column in get_numeric_columns(df)
         if column not in identifier_columns
     ]
 
-    # ---------------------------------------------------------
-    # Identify categorical columns
-    # ---------------------------------------------------------
+    candidate_columns = text_columns(df) + [
+        column
+        for column in df.columns
+        if pd.api.types.is_bool_dtype(df[column])
+    ]
+
+    date_columns = detect_date_columns(df)
 
     categorical_columns = []
 
-    for column in df.select_dtypes(
-        include=["object", "category", "bool"]
-    ).columns:
+    for column in candidate_columns:
 
-        if column in identifier_columns:
+        if column in identifier_columns or column in date_columns:
             continue
 
         unique_count = df[column].nunique(dropna=True)
@@ -154,18 +172,39 @@ def generate_visualizations(df: pd.DataFrame) -> list[dict]:
 
         categorical_columns.append(column)
 
-    # ---------------------------------------------------------
-    # Identify date columns
-    # ---------------------------------------------------------
+    return {
+        "numeric": numeric_columns,
+        "categorical": categorical_columns,
+        "date": date_columns,
+    }
 
-    date_columns = detect_date_columns(df)
 
-    # Date columns should not also be treated as categories
-    categorical_columns = [
-        column
-        for column in categorical_columns
-        if column not in date_columns
-    ]
+def generate_visualizations(df: pd.DataFrame) -> list[dict]:
+    """
+    Automatically generate chart specifications for a tabular dataset.
+
+    Each item matches the frontend VisualizationItem type:
+    {id, title, chartType, description, columnsUsed, reasonSelected,
+     data, xKey, yKey}
+
+    Supported visualizations:
+
+    1. Numerical histograms
+    2. Categorical bar charts
+    3. Date-based line charts
+
+    ID and high-cardinality columns are skipped.
+    """
+
+    visualizations = []
+
+    if df.empty:
+        return visualizations
+
+    columns = select_columns(df)
+    numeric_columns = columns["numeric"]
+    categorical_columns = columns["categorical"]
+    date_columns = columns["date"]
 
     # ---------------------------------------------------------
     # 1. Numerical histograms
@@ -173,23 +212,24 @@ def generate_visualizations(df: pd.DataFrame) -> list[dict]:
 
     for column in numeric_columns[:5]:
 
-        values = (
-            pd.to_numeric(
-                df[column],
-                errors="coerce",
-            )
-            .dropna()
-            .tolist()
-        )
+        values = finite_numeric(df[column]).dropna()
 
-        if not values:
+        if values.empty:
             continue
 
         visualizations.append({
-            "type": "histogram",
+            "id": f"histogram_{column}",
             "title": f"Distribution of {column}",
-            "column": column,
-            "data": values,
+            "chartType": "histogram",
+            "description": (
+                f"How values of {column} are spread across "
+                "equal-width ranges."
+            ),
+            "columnsUsed": [column],
+            "reasonSelected": f"{column} is a numerical measurement.",
+            "data": histogram_bins(values),
+            "xKey": "bin",
+            "yKey": "count",
         })
 
     # ---------------------------------------------------------
@@ -200,6 +240,7 @@ def generate_visualizations(df: pd.DataFrame) -> list[dict]:
 
         counts = (
             df[column]
+            .astype(object)
             .fillna("Missing")
             .astype(str)
             .value_counts()
@@ -210,11 +251,21 @@ def generate_visualizations(df: pd.DataFrame) -> list[dict]:
             continue
 
         visualizations.append({
-            "type": "bar",
+            "id": f"bar_{column}",
             "title": f"{column} Distribution",
-            "column": column,
-            "labels": counts.index.tolist(),
-            "values": counts.values.tolist(),
+            "chartType": "bar",
+            "description": f"Number of rows for each {column} value.",
+            "columnsUsed": [column],
+            "reasonSelected": (
+                f"{column} is categorical with "
+                f"{df[column].nunique(dropna=True)} distinct values."
+            ),
+            "data": [
+                {"name": str(name), "count": int(count)}
+                for name, count in counts.items()
+            ],
+            "xKey": "name",
+            "yKey": "count",
         })
 
     # ---------------------------------------------------------
@@ -223,17 +274,7 @@ def generate_visualizations(df: pd.DataFrame) -> list[dict]:
 
     for date_column in date_columns[:2]:
 
-        try:
-            dates = pd.to_datetime(
-                df[date_column],
-                errors="coerce",
-                format="mixed",
-            )
-        except (TypeError, ValueError):
-            dates = pd.to_datetime(
-                df[date_column],
-                errors="coerce",
-            )
+        dates = parse_dates(df[date_column])
 
         valid_mask = dates.notna()
 
@@ -245,9 +286,8 @@ def generate_visualizations(df: pd.DataFrame) -> list[dict]:
 
             trend_df = pd.DataFrame({
                 "date": dates[valid_mask],
-                "value": pd.to_numeric(
-                    df.loc[valid_mask, numeric_column],
-                    errors="coerce",
+                "value": finite_numeric(
+                    df.loc[valid_mask, numeric_column]
                 ),
             }).dropna()
 
@@ -263,40 +303,50 @@ def generate_visualizations(df: pd.DataFrame) -> list[dict]:
             )
 
             visualizations.append({
-                "type": "line",
+                "id": f"line_{date_column}_{numeric_column}",
                 "title": f"{numeric_column} Over Time",
-                "date_column": date_column,
-                "value_column": numeric_column,
+                "chartType": "line",
+                "description": (
+                    f"Average {numeric_column} per {date_column}."
+                ),
+                "columnsUsed": [date_column, numeric_column],
+                "reasonSelected": (
+                    f"{date_column} contains dates and "
+                    f"{numeric_column} is numerical."
+                ),
                 "data": [
                     {
                         "date": row["date"].isoformat(),
-                        "value": float(row["value"]),
+                        "value": safe_float(row["value"], 4),
                     }
                     for _, row in trend_df.iterrows()
                 ],
+                "xKey": "date",
+                "yKey": "value",
             })
 
-    # ---------------------------------------------------------
-    # 4. Correlation matrix
-    # ---------------------------------------------------------
-
-    if len(numeric_columns) >= 2:
-
-        correlation = (
-            df[numeric_columns]
-            .corr()
-            .round(3)
-        )
-
-        visualizations.append({
-            "type": "correlation",
-            "title": "Numeric Correlation Matrix",
-            "columns": numeric_columns,
-            "values": correlation.fillna(0).values.tolist(),
-        })
-
-    # ---------------------------------------------------------
-    # Return all visualization specifications
-    # ---------------------------------------------------------
-
     return visualizations
+
+
+def correlation_matrix(df: pd.DataFrame) -> dict:
+    """
+    Pearson correlation between the non-identifier numeric columns.
+    """
+
+    numeric_columns = select_columns(df)["numeric"]
+
+    if len(numeric_columns) < 2:
+        return {"columns": numeric_columns, "matrix": []}
+
+    correlation = (
+        df[numeric_columns]
+        .apply(finite_numeric)
+        .corr()
+        .round(3)
+        .fillna(0)
+    )
+
+    return {
+        "columns": numeric_columns,
+        "matrix": correlation.values.tolist(),
+    }

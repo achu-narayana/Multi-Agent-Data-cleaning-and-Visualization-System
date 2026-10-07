@@ -1,15 +1,19 @@
 import React, { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { Cpu, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react'
-import { useAuth } from '@/context/AuthContext'
+import { useAuth } from '@/context/useAuth'
+import { getErrorMessage } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 
 export const LoginPage: React.FC = () => {
-  const [email, setEmail] = useState('rahul.aiml@aura-intelligence.io')
-  const [password, setPassword] = useState('password123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const { login, isLoading } = useAuth()
+  const { login, isLoading, isAuthenticated } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const from =
+    (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/dashboard'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -20,11 +24,15 @@ export const LoginPage: React.FC = () => {
     }
 
     try {
-      await login({ email, password })
-      navigate('/dashboard')
-    } catch (err: any) {
-      setError(err.message || 'Invalid email or password. Please verify credentials.')
+      await login({ email: email.trim(), password })
+      navigate(from, { replace: true })
+    } catch (err) {
+      setError(getErrorMessage(err, 'Sign in failed. Please try again.'))
     }
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to={from} replace />
   }
 
   return (

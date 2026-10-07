@@ -1,6 +1,13 @@
 import pandas as pd
 
 
+# "domain_rule_violation" is the name used by older stored results.
+BUSINESS_RULE_TYPES = {
+    "business_rule_violation",
+    "domain_rule_violation",
+}
+
+
 def validate_dataset(
     df: pd.DataFrame,
     anomalies: list[dict] | None = None,
@@ -112,17 +119,26 @@ def validate_dataset(
     business_rule_violations = [
         anomaly
         for anomaly in anomalies
-        if anomaly.get("type") == "business_rule_violation"
+        if anomaly.get("type") in BUSINESS_RULE_TYPES
     ]
+
+    business_rule_count = sum(
+        int(anomaly.get("count", 0))
+        for anomaly in business_rule_violations
+    )
 
     if business_rule_violations:
         checks["business_rules"] = {
             "status": "FAIL",
-            "count": len(business_rule_violations),
+            "count": business_rule_count,
+            "columns": [
+                anomaly.get("column")
+                for anomaly in business_rule_violations
+            ],
         }
 
         issues.append(
-            f"{len(business_rule_violations)} "
+            f"{business_rule_count} "
             "business-rule violations remain"
         )
 
@@ -133,7 +149,36 @@ def validate_dataset(
         }
 
     # ---------------------------------------------------------
-    # 6. Statistical outliers
+    # 6. Negative values in naturally non-negative columns
+    # ---------------------------------------------------------
+    negative_warnings = [
+        anomaly
+        for anomaly in anomalies
+        if anomaly.get("type") == "negative_value_warning"
+    ]
+
+    negative_count = sum(
+        int(anomaly.get("count", 0))
+        for anomaly in negative_warnings
+    )
+
+    if negative_warnings:
+        checks["negative_values"] = {
+            "status": "WARNING",
+            "count": negative_count,
+            "columns": [
+                anomaly.get("column")
+                for anomaly in negative_warnings
+            ],
+        }
+    else:
+        checks["negative_values"] = {
+            "status": "PASS",
+            "count": 0,
+        }
+
+    # ---------------------------------------------------------
+    # 7. Statistical outliers
     # ---------------------------------------------------------
     statistical_outliers = [
         anomaly
@@ -141,10 +186,15 @@ def validate_dataset(
         if anomaly.get("type") == "statistical_outlier"
     ]
 
+    outlier_count = sum(
+        int(anomaly.get("count", 0))
+        for anomaly in statistical_outliers
+    )
+
     if statistical_outliers:
         checks["statistical_outliers"] = {
             "status": "WARNING",
-            "count": len(statistical_outliers),
+            "count": outlier_count,
         }
     else:
         checks["statistical_outliers"] = {
@@ -153,22 +203,27 @@ def validate_dataset(
         }
 
     # ---------------------------------------------------------
-    # 7. Quality score
+    # 8. Quality score
     # ---------------------------------------------------------
+    # Deductions are based on the share of affected cells/rows,
+    # so the score is comparable between small and large datasets.
+    total_cells = max(rows * columns, 1)
+    total_rows = max(rows, 1)
+
     quality_score = 100.0
 
     # Missing values
     if missing_count > 0:
         quality_score -= min(
             30,
-            missing_count * 5
+            5 + 100 * missing_count / total_cells,
         )
 
     # Duplicate rows
     if duplicate_count > 0:
         quality_score -= min(
             20,
-            duplicate_count * 5
+            5 + 100 * duplicate_count / total_rows,
         )
 
     # Invalid numeric values
@@ -179,14 +234,21 @@ def validate_dataset(
     if business_rule_violations:
         quality_score -= min(
             30,
-            len(business_rule_violations) * 10
+            10 + 100 * business_rule_count / total_rows,
         )
 
-    # Statistical outliers
+    # Negative values (warning)
+    if negative_warnings:
+        quality_score -= min(
+            10,
+            2 + 100 * negative_count / total_rows,
+        )
+
+    # Statistical outliers (warning)
     if statistical_outliers:
         quality_score -= min(
             10,
-            len(statistical_outliers) * 2
+            100 * outlier_count / total_cells,
         )
 
     quality_score = max(
@@ -195,7 +257,7 @@ def validate_dataset(
     )
 
     # ---------------------------------------------------------
-    # 8. Overall validity
+    # 9. Overall validity
     # ---------------------------------------------------------
     critical_failures = [
         checks["missing_values"]["status"] == "FAIL",

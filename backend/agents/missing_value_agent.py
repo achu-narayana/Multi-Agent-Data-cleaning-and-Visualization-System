@@ -7,6 +7,8 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
     explainable rules.
     """
 
+    df = df.copy()
+
     actions = []
 
     for column in df.columns:
@@ -14,6 +16,20 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
         missing_count = int(df[column].isna().sum())
 
         if missing_count == 0:
+            continue
+
+        # A completely empty column has nothing to impute from.
+        if missing_count == len(df):
+
+            actions.append(
+                {
+                    "column": column,
+                    "missing_values": missing_count,
+                    "method": "skipped_all_missing",
+                    "replacement_value": None,
+                }
+            )
+
             continue
 
         # Numerical columns

@@ -1,7 +1,15 @@
-import os
 from typing import Any
 
+import numpy as np
 import pandas as pd
+
+from services.dataframe_utils import (
+    load_dataset,
+    numeric_columns,
+    safe_float,
+    text_columns,
+    to_json_safe,
+)
 
 
 def profile_dataset(file_path: str) -> dict[str, Any]:
@@ -10,16 +18,14 @@ def profile_dataset(file_path: str) -> dict[str, Any]:
     a structured data-quality profile.
     """
 
-    extension = os.path.splitext(file_path)[1].lower()
+    return profile_dataframe(load_dataset(file_path))
 
-    if extension == ".csv":
-        df = pd.read_csv(file_path)
 
-    elif extension in [".xlsx", ".xls"]:
-        df = pd.read_excel(file_path)
-
-    else:
-        raise ValueError("Unsupported file format")
+def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
+    """
+    Return a structured, JSON-safe data-quality profile
+    for a dataframe.
+    """
 
     # -----------------------------
     # Basic dataset information
@@ -64,24 +70,24 @@ def profile_dataset(file_path: str) -> dict[str, Any]:
     # Numerical statistics
     # -----------------------------
 
-    numerical_columns = df.select_dtypes(
-        include=["number"]
-    ).columns.tolist()
+    numerical_columns = numeric_columns(df)
 
     numerical_statistics = {}
 
     for column in numerical_columns:
-        series = df[column].dropna()
+        series = finite_values(df[column])
 
         if len(series) == 0:
             continue
 
+        # The standard deviation of a single value is undefined,
+        # so safe_float returns None for it.
         numerical_statistics[column] = {
-            "min": float(series.min()),
-            "max": float(series.max()),
-            "mean": round(float(series.mean()), 2),
-            "median": round(float(series.median()), 2),
-            "standard_deviation": round(float(series.std()), 2),
+            "min": safe_float(series.min()),
+            "max": safe_float(series.max()),
+            "mean": safe_float(series.mean(), 2),
+            "median": safe_float(series.median(), 2),
+            "standard_deviation": safe_float(series.std(), 2),
         }
 
     # -----------------------------
@@ -92,7 +98,7 @@ def profile_dataset(file_path: str) -> dict[str, Any]:
     outliers = {}
 
     for column in numerical_columns:
-        series = df[column].dropna()
+        series = finite_values(df[column])
 
         if len(series) < 4:
             continue
@@ -120,9 +126,7 @@ def profile_dataset(file_path: str) -> dict[str, Any]:
     # Categorical value overview
     # -----------------------------
 
-    categorical_columns = df.select_dtypes(
-        include=["object", "category"]
-    ).columns.tolist()
+    categorical_columns = text_columns(df)
 
     categorical_information = {}
 
@@ -163,7 +167,7 @@ def profile_dataset(file_path: str) -> dict[str, Any]:
     # Final profile
     # -----------------------------
 
-    return {
+    return to_json_safe({
         "dataset": {
             "rows": rows,
             "columns": columns,
@@ -176,4 +180,12 @@ def profile_dataset(file_path: str) -> dict[str, Any]:
         "outliers": outliers,
         "categorical_information": categorical_information,
         "quality_score": round(quality_score, 2),
-    }
+    })
+
+
+def finite_values(series: pd.Series) -> pd.Series:
+    return (
+        pd.to_numeric(series, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )

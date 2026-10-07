@@ -18,6 +18,11 @@ export const AgentPipeline: React.FC<AgentPipelineProps> = ({
   datasetName,
   qualityScore,
 }) => {
+  const isPostCleaning = (agent: AgentInfo) =>
+    agent.type === 'visualization' || agent.type === 'insight'
+  const cleaningAgents = agents.filter((a) => !isPostCleaning(a))
+  const postAgents = agents.filter(isPostCleaning)
+
   return (
     <div className="space-y-4">
       {/* Starting Node: Raw Dataset */}
@@ -32,7 +37,7 @@ export const AgentPipeline: React.FC<AgentPipelineProps> = ({
           </div>
         </div>
         <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 font-medium">
-          Raw Input Stream
+          Raw Input
         </span>
       </div>
 
@@ -43,9 +48,9 @@ export const AgentPipeline: React.FC<AgentPipelineProps> = ({
         </div>
       </div>
 
-      {/* Agents 0 to 6 (Cleaning Pipeline: Orchestrator to Validation) */}
+      {/* Cleaning agents (profiling through validation) */}
       <div className="space-y-3">
-        {agents.slice(0, 7).map((agent, index) => (
+        {cleaningAgents.map((agent, index) => (
           <React.Fragment key={agent.id}>
             <AgentCard
               agent={agent}
@@ -53,7 +58,7 @@ export const AgentPipeline: React.FC<AgentPipelineProps> = ({
               isSelected={selectedAgentId === agent.id}
               onClick={() => onSelectAgent(agent)}
             />
-            {index < 6 && (
+            {index < cleaningAgents.length - 1 && (
               <div className="flex justify-center -my-1">
                 <div className="flex flex-col items-center">
                   <div className="w-0.5 h-3 bg-slate-200" />
@@ -80,11 +85,11 @@ export const AgentPipeline: React.FC<AgentPipelineProps> = ({
           </div>
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Milestone</span>
-            <h4 className="text-sm font-bold text-emerald-950">Certified Quality Score: {qualityScore}%</h4>
+            <h4 className="text-sm font-bold text-emerald-950">Quality Score After Cleaning: {qualityScore}</h4>
           </div>
         </div>
         <span className="text-xs font-bold text-emerald-700 bg-white px-2.5 py-1 rounded-full border border-emerald-200">
-          Cleaned Schema Ready
+          Cleaned Dataset
         </span>
       </div>
 
@@ -95,17 +100,17 @@ export const AgentPipeline: React.FC<AgentPipelineProps> = ({
         </div>
       </div>
 
-      {/* Agents 7 & 8: Visualization Agent & Insight Agent */}
+      {/* Post-cleaning agents: Visualization & Insight */}
       <div className="space-y-3">
-        {agents.slice(7).map((agent, index) => (
+        {postAgents.map((agent, index) => (
           <React.Fragment key={agent.id}>
             <AgentCard
               agent={agent}
-              stepNumber={index + 8}
+              stepNumber={cleaningAgents.length + index + 1}
               isSelected={selectedAgentId === agent.id}
               onClick={() => onSelectAgent(agent)}
             />
-            {index === 0 && (
+            {index < postAgents.length - 1 && (
               <div className="flex justify-center -my-1">
                 <div className="flex flex-col items-center">
                   <div className="w-0.5 h-3 bg-slate-200" />

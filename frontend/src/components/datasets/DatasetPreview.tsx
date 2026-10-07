@@ -1,16 +1,19 @@
 import React, { useState, useMemo } from 'react'
-import { Search, ArrowUpDown, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react'
+import { Search, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 
 interface DatasetPreviewProps {
   data: Record<string, any>[]
+  /** Explicit column order (e.g. from the preview endpoint); falls back to the first row's keys. */
+  columns?: string[]
   title?: string
   rowsPerPageDefault?: number
 }
 
 export const DatasetPreview: React.FC<DatasetPreviewProps> = ({
   data,
+  columns: columnsProp,
   title = 'Data Preview (Spreadsheet View)',
   rowsPerPageDefault = 8,
 }) => {
@@ -21,9 +24,10 @@ export const DatasetPreview: React.FC<DatasetPreviewProps> = ({
   const [rowsPerPage] = useState(rowsPerPageDefault)
 
   const columns = useMemo(() => {
+    if (columnsProp && columnsProp.length > 0) return columnsProp
     if (!data || data.length === 0) return []
     return Object.keys(data[0])
-  }, [data])
+  }, [data, columnsProp])
 
   // Filter by search
   const filteredData = useMemo(() => {
